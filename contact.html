@@ -964,6 +964,10 @@
     <div class="inquire-card">
       <div class="inquire-form-pane" id="inquireFormPane">
       <form class="inquire-form" id="inquireForm">
+        <!-- Spam trap: hidden from people, bots fill it in and get silently dropped -->
+        <div style="position:absolute; left:-9999px; width:1px; height:1px; overflow:hidden;" aria-hidden="true">
+          <label>Leave this empty <input type="text" name="website" tabindex="-1" autocomplete="off"></label>
+        </div>
         <div class="form-row">
           <label>Full Name
             <input type="text" name="name" required>

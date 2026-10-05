@@ -23,11 +23,46 @@ $config = require __DIR__ . '/config.php';
 $brevoApiKey = $config['brevo_api_key'];
 $brevoListId = 4; // "Sheddingtin" list in Brevo
 
+// ---- SPAM PROTECTION ----
+// Honeypot: the hidden "website" field is invisible to people. Bots that
+// fill in every field get a fake success so they don't retry.
+if (trim($_POST['website'] ?? '') !== '') {
+    echo json_encode(['success' => true]);
+    exit;
+}
+
+// Rate limit: at most 5 submissions per IP address per hour.
+$rateDir = sys_get_temp_dir() . '/sheddingtin_inquiries';
+if (!is_dir($rateDir)) {
+    @mkdir($rateDir, 0700, true);
+}
+$rateFile = $rateDir . '/' . hash('sha256', $_SERVER['REMOTE_ADDR'] ?? 'unknown');
+$now = time();
+$recent = [];
+if (is_file($rateFile)) {
+    $recent = array_filter(
+        array_map('intval', explode("\n", (string) @file_get_contents($rateFile))),
+        fn($t) => $t > $now - 3600
+    );
+}
+if (count($recent) >= 5) {
+    http_response_code(429);
+    echo json_encode(['success' => false, 'error' => 'Too many requests. Please try again later or message us on WhatsApp.']);
+    exit;
+}
+$recent[] = $now;
+@file_put_contents($rateFile, implode("\n", $recent), LOCK_EX);
+
 // ---- READ + VALIDATE INPUT ----
 $name     = trim($_POST['name'] ?? '');
 $email    = trim($_POST['email'] ?? '');
 $interest = trim($_POST['interest'] ?? 'General Enquiry');
 $message  = trim($_POST['message'] ?? '');
+
+// Cap field lengths so nobody can stuff huge payloads into the Brevo list.
+$name     = mb_substr($name, 0, 100);
+$interest = mb_substr($interest, 0, 100);
+$message  = mb_substr($message, 0, 2000);
 $consent  = isset($_POST['consent']) && $_POST['consent'] === 'on';
 
 if ($name === '' || $email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
@@ -85,12 +120,9 @@ if ($contactOk) {
     echo json_encode(['success' => true]);
 } else {
     http_response_code(502);
+    // Details stay in the server error log above; visitors only get a generic message.
     echo json_encode([
         'success' => false,
-        'error' => 'Could not reach Brevo. Check that the API key is active.',
-        'debug' => [
-            'contact_http_code' => $contactHttpCode,
-            'contact_response' => json_decode($contactResponse),
-        ],
+        'error' => 'Something went wrong. Please try again or message us on WhatsApp.',
     ]);
 }
